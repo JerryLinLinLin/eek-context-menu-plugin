@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "EekContextMenu (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "EekContextMenu (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}
