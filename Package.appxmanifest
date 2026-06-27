@@ -63,6 +63,11 @@
                 Id="EekScanDirectory"
                 Clsid="4B4490A7-D5BE-48CB-B133-3D87E6E2B9EF" />
             </desktop5:ItemType>
+            <desktop5:ItemType Type="*">
+              <desktop5:Verb
+                Id="EekScanFile"
+                Clsid="4B4490A7-D5BE-48CB-B133-3D87E6E2B9EF" />
+            </desktop5:ItemType>
           </desktop4:FileExplorerContextMenus>
         </desktop4:Extension>
       </Extensions>

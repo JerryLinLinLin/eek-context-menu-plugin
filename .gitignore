@@ -38,6 +38,8 @@ BundleArtifacts/
 *.appx
 *.appxbundle
 *.appxupload
+*.cer
+*.pfx
 
 # Publish output
 publish/

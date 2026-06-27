@@ -1,0 +1,178 @@
+name: Package MSIX
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Optional package version, for example 1.2.3 or 1.2.3.4"
+        required: false
+        type: string
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Build signed MSIX package
+    runs-on: windows-latest
+
+    env:
+      Configuration: Release
+      Platform: x64
+      PackagePublisher: CN=EekContextMenu
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Resolve package version
+        id: version
+        shell: pwsh
+        run: |
+          $manualVersion = "${{ github.event.inputs.version }}"
+          if (-not [string]::IsNullOrWhiteSpace($manualVersion)) {
+            $tagVersion = $manualVersion.TrimStart("v")
+          } elseif ($env:GITHUB_REF_TYPE -eq "tag") {
+            $tagVersion = $env:GITHUB_REF_NAME.TrimStart("v")
+          } else {
+            $tagVersion = "1.0.$env:GITHUB_RUN_NUMBER.0"
+          }
+
+          if ($tagVersion -notmatch "^\d+\.\d+\.\d+(\.\d+)?$") {
+            throw "Package versions must look like 1.2.3 or 1.2.3.4."
+          }
+
+          $parts = $tagVersion.Split(".")
+          while ($parts.Count -lt 4) {
+            $parts += "0"
+          }
+
+          $packageVersion = $parts -join "."
+          "PackageVersion=$packageVersion" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "package_version=$packageVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "Using package version $packageVersion"
+
+      - name: Update package manifest version
+        shell: pwsh
+        run: |
+          [xml]$manifest = Get-Content Package.appxmanifest
+          $manifest.Package.Identity.Version = $env:PackageVersion
+          $manifest.Save((Resolve-Path Package.appxmanifest).Path)
+
+      - name: Create test signing certificate
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts\cert | Out-Null
+
+          $cert = New-SelfSignedCertificate `
+            -Type Custom `
+            -Subject $env:PackagePublisher `
+            -FriendlyName "EEK Context Menu Test Signing" `
+            -CertStoreLocation Cert:\CurrentUser\My `
+            -KeyExportPolicy Exportable `
+            -KeyUsage DigitalSignature `
+            -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3")
+
+          Export-Certificate -Cert $cert -FilePath artifacts\cert\EekContextMenu.Test.cer | Out-Null
+          Import-Certificate -FilePath artifacts\cert\EekContextMenu.Test.cer -CertStoreLocation Cert:\CurrentUser\TrustedPeople | Out-Null
+          "PackageCertificateThumbprint=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Build signed MSIX
+        shell: pwsh
+        run: |
+          $packageDir = Join-Path $env:GITHUB_WORKSPACE "artifacts\msix\"
+
+          msbuild .\EekContextMenu.sln `
+            /restore `
+            /m `
+            /p:Configuration=$env:Configuration `
+            /p:Platform=$env:Platform `
+            /p:GenerateAppxPackageOnBuild=true `
+            /p:UapAppxPackageBuildMode=SideloadOnly `
+            /p:AppxBundle=Never `
+            /p:AppxPackageDir="$packageDir" `
+            /p:AppxPackageVersion=$env:PackageVersion `
+            /p:AppxPackageSigningEnabled=true `
+            /p:PackageCertificateThumbprint=$env:PackageCertificateThumbprint
+
+      - name: Create release install note
+        shell: pwsh
+        run: |
+          $payloadDir = "artifacts\release-payload"
+          New-Item -ItemType Directory -Force -Path $payloadDir | Out-Null
+
+          $appPackage = Get-ChildItem artifacts\msix -Recurse -Filter "EekContextMenu_*.msix" |
+            Where-Object { $_.FullName -notmatch "\\Dependencies\\" } |
+            Select-Object -First 1
+
+          if (-not $appPackage) {
+            throw "Could not find the app MSIX package."
+          }
+
+          Copy-Item $appPackage.FullName -Destination $payloadDir -Force
+          Copy-Item artifacts\cert\EekContextMenu.Test.cer -Destination $payloadDir -Force
+
+          @"
+          # EEK Context Menu $env:PackageVersion
+
+          This package is signed with the included self-signed test certificate.
+
+          Install:
+
+          1. Extract this zip.
+          2. Right-click EekContextMenu.Test.cer, choose Install Certificate.
+          3. Select Local Machine, then place the certificate in Trusted People.
+          4. Install the EekContextMenu .msix file.
+          5. Restart Explorer or sign out/in if the context menu does not appear immediately.
+
+          Emsisoft Emergency Kit is not bundled. Install or unzip EEK separately, defaulting to C:\EEK, or set its folder in the app after installation.
+
+          If installation reports a missing Microsoft.WindowsAppRuntime dependency, install the Windows App Runtime from Microsoft, then retry the .msix.
+          "@ | Set-Content -Path (Join-Path $payloadDir "INSTALL-RELEASE.md")
+
+      - name: Zip release payload
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts\release | Out-Null
+          Compress-Archive -Path artifacts\release-payload\* -DestinationPath artifacts\release\EekContextMenu-msix-${env:PackageVersion}.zip -Force
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EekContextMenu-msix-${{ steps.version.outputs.package_version }}
+          path: artifacts/release/*.zip
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $zip = Get-ChildItem artifacts\release\*.zip | Select-Object -First 1
+          $notes = @"
+          Signed MSIX package for EEK Context Menu.
+
+          This release uses a self-signed test certificate. Install the included `.cer` into Trusted People before installing the `.msix`.
+
+          Emsisoft Emergency Kit is not included. The app defaults to C:\EEK and can be changed in settings.
+          "@
+
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $zip.FullName --clobber
+          } else {
+            gh release create $tag $zip.FullName --title $tag --notes $notes
+          }

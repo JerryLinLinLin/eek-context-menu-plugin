@@ -16,6 +16,7 @@ const CLSID CLSID_EekExplorerCommand =
 
 long g_objects = 0;
 long g_locks = 0;
+HMODULE g_module = nullptr;
 
 std::wstring JoinPath(std::wstring left, const wchar_t* right)
 {
@@ -40,9 +41,40 @@ bool FileExists(const std::wstring& path)
     return attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) == 0;
 }
 
+bool FileSystemItemExists(const std::wstring& path)
+{
+    return GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES;
+}
+
 std::wstring QuoteArg(const std::wstring& value)
 {
-    return L"\"" + value + L"\"";
+    std::wstring quoted = L"\"";
+    size_t backslashes = 0;
+
+    for (const wchar_t character : value)
+    {
+        if (character == L'\\')
+        {
+            ++backslashes;
+            continue;
+        }
+
+        if (character == L'"')
+        {
+            quoted.append(backslashes * 2 + 1, L'\\');
+            quoted += character;
+            backslashes = 0;
+            continue;
+        }
+
+        quoted.append(backslashes, L'\\');
+        backslashes = 0;
+        quoted += character;
+    }
+
+    quoted.append(backslashes * 2, L'\\');
+    quoted += L'"';
+    return quoted;
 }
 
 std::wstring ReadStringSetting(const wchar_t* name, const wchar_t* fallback)
@@ -107,7 +139,7 @@ std::wstring GetScannerPath()
     return JoinPath(JoinPath(GetEekRoot(), L"bin64"), L"a2cmd.exe");
 }
 
-HRESULT GetSingleFolderPath(IShellItemArray* items, std::wstring& folderPath)
+HRESULT GetSingleItemPath(IShellItemArray* items, std::wstring& itemPath)
 {
     if (items == nullptr)
     {
@@ -137,7 +169,7 @@ HRESULT GetSingleFolderPath(IShellItemArray* items, std::wstring& folderPath)
     hr = item->GetDisplayName(SIGDN_FILESYSPATH, &path);
     if (SUCCEEDED(hr))
     {
-        folderPath = path;
+        itemPath = path;
         CoTaskMemFree(path);
     }
 
@@ -154,46 +186,28 @@ HRESULT LaunchScan(const std::wstring& target)
         return HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
     }
 
-    const std::wstring eekRoot = GetEekRoot();
-    const std::wstring quarantine = JoinPath(eekRoot, L"Quarantine");
-    const std::wstring reports = JoinPath(eekRoot, L"Reports");
-    CreateDirectoryW(quarantine.c_str(), nullptr);
-    CreateDirectoryW(reports.c_str(), nullptr);
-
-    SYSTEMTIME now{};
-    GetLocalTime(&now);
-    wchar_t logName[64]{};
-    HRESULT hr = StringCchPrintfW(
-        logName,
-        ARRAYSIZE(logName),
-        L"context-menu-scan-%04u%02u%02u-%02u%02u%02u.log",
-        now.wYear,
-        now.wMonth,
-        now.wDay,
-        now.wHour,
-        now.wMinute,
-        now.wSecond);
-    if (FAILED(hr))
+    wchar_t modulePath[MAX_PATH]{};
+    if (GetModuleFileNameW(g_module, modulePath, ARRAYSIZE(modulePath)) == 0)
     {
-        return hr;
+        return HRESULT_FROM_WIN32(GetLastError());
     }
 
-    const std::wstring logPath = JoinPath(reports, logName);
-    const std::wstring parameters =
-        L"/d /k \"" +
-        QuoteArg(scanner) + L" " +
-        QuoteArg(L"/f=" + target) + L" /a " +
-        QuoteArg(L"/q=" + quarantine) + L" " +
-        QuoteArg(L"/l=" + logPath) +
-        L"\"";
+    const std::wstring appFolder = ParentPath(modulePath);
+    const std::wstring appPath = JoinPath(appFolder, L"EekContextMenu.exe");
+    if (!FileExists(appPath))
+    {
+        MessageBoxW(nullptr, appPath.c_str(), L"EEK context menu app was not found", MB_OK | MB_ICONERROR);
+        return HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
+    }
+
+    const std::wstring parameters = L"--scan " + QuoteArg(target);
 
     SHELLEXECUTEINFOW executeInfo{ sizeof(executeInfo) };
     executeInfo.fMask = SEE_MASK_NOASYNC;
-    executeInfo.lpVerb = L"open";
-    executeInfo.lpFile = L"cmd.exe";
+    executeInfo.lpVerb = L"runas";
+    executeInfo.lpFile = appPath.c_str();
     executeInfo.lpParameters = parameters.c_str();
-    const std::wstring scannerFolder = ParentPath(scanner);
-    executeInfo.lpDirectory = scannerFolder.empty() ? nullptr : scannerFolder.c_str();
+    executeInfo.lpDirectory = appFolder.c_str();
     executeInfo.nShow = SW_SHOWNORMAL;
 
     if (!ShellExecuteExW(&executeInfo))
@@ -269,7 +283,7 @@ public:
 
     IFACEMETHODIMP GetToolTip(IShellItemArray*, LPWSTR* tooltip) override
     {
-        return tooltip == nullptr ? E_POINTER : SHStrDupW(L"Scan this folder with Emsisoft Emergency Kit.", tooltip);
+        return tooltip == nullptr ? E_POINTER : SHStrDupW(L"Scan this item with Emsisoft Emergency Kit.", tooltip);
     }
 
     IFACEMETHODIMP GetCanonicalName(GUID* commandName) override
@@ -303,6 +317,13 @@ public:
             return S_OK;
         }
 
+        std::wstring target;
+        if (FAILED(GetSingleItemPath(items, target)) || !FileSystemItemExists(target))
+        {
+            *state = ECS_DISABLED;
+            return S_OK;
+        }
+
         *state = ECS_ENABLED;
         return S_OK;
     }
@@ -315,7 +336,7 @@ public:
         }
 
         std::wstring target;
-        const HRESULT hr = GetSingleFolderPath(items, target);
+        const HRESULT hr = GetSingleItemPath(items, target);
         return FAILED(hr) ? hr : LaunchScan(target);
     }
 
@@ -458,7 +479,12 @@ extern "C" HRESULT __stdcall DllGetClassObject(REFCLSID clsid, REFIID riid, void
     return hr;
 }
 
-BOOL APIENTRY DllMain(HMODULE, DWORD, LPVOID)
+BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID)
 {
+    if (reason == DLL_PROCESS_ATTACH)
+    {
+        g_module = module;
+    }
+
     return TRUE;
 }

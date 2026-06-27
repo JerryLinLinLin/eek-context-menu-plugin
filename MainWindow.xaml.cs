@@ -5,16 +5,20 @@ namespace EekContextMenu;
 
 public sealed partial class MainWindow : Window
 {
-    public MainWindow()
+    public MainWindow(string? scanTarget = null)
     {
         InitializeComponent();
 
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
 
-        AppWindow.SetIcon("Assets/AppIcon.ico");
-        AppWindow.Resize(new SizeInt32(760, 520));
+        var isScanWindow = !string.IsNullOrWhiteSpace(scanTarget);
+        Title = isScanWindow ? "EEK Scan" : "EEK Context Menu";
+        AppTitleBar.Title = Title;
 
-        RootFrame.Navigate(typeof(MainPage));
+        AppWindow.SetIcon("Assets/AppIcon.ico");
+        AppWindow.Resize(isScanWindow ? new SizeInt32(1400, 920) : new SizeInt32(800, 680));
+
+        RootFrame.Navigate(isScanWindow ? typeof(ScanPage) : typeof(MainPage), scanTarget);
     }
 }

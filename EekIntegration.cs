@@ -9,6 +9,13 @@ public static class EekIntegration
     private const string SettingsKeyPath = @"Software\EekContextMenu";
     private const string EekRootValue = "EekRoot";
     private const string EnabledValue = "Enabled";
+    private const string CheckForUpdatesBeforeScanValue = "CheckForUpdatesBeforeScan";
+    private const string QuarantineDetectionsValue = "QuarantineDetections";
+
+    public sealed record ScanOptions(
+        string EekRoot,
+        bool CheckForUpdatesBeforeScan,
+        bool QuarantineDetections);
 
     public static string GetEekRoot()
     {
@@ -19,11 +26,25 @@ public static class EekIntegration
 
     public static bool IsEnabled()
     {
-        using var key = Registry.CurrentUser.OpenSubKey(SettingsKeyPath);
-        return key?.GetValue(EnabledValue) is int value && value != 0;
+        return GetBoolSetting(EnabledValue, false);
     }
 
-    public static void Save(string eekRoot, bool enabled)
+    public static bool CheckForUpdatesBeforeScan()
+    {
+        return GetBoolSetting(CheckForUpdatesBeforeScanValue, true);
+    }
+
+    public static bool QuarantineDetections()
+    {
+        return GetBoolSetting(QuarantineDetectionsValue, true);
+    }
+
+    public static ScanOptions GetScanOptions()
+    {
+        return new ScanOptions(GetEekRoot(), CheckForUpdatesBeforeScan(), QuarantineDetections());
+    }
+
+    public static void Save(string eekRoot, bool enabled, bool checkForUpdatesBeforeScan, bool quarantineDetections)
     {
         var root = NormalizeEekRoot(eekRoot);
         if (enabled)
@@ -39,6 +60,8 @@ public static class EekIntegration
             ?? throw new InvalidOperationException("Could not open the settings registry key.");
         key.SetValue(EekRootValue, root, RegistryValueKind.String);
         key.SetValue(EnabledValue, enabled ? 1 : 0, RegistryValueKind.DWord);
+        key.SetValue(CheckForUpdatesBeforeScanValue, checkForUpdatesBeforeScan ? 1 : 0, RegistryValueKind.DWord);
+        key.SetValue(QuarantineDetectionsValue, quarantineDetections ? 1 : 0, RegistryValueKind.DWord);
     }
 
     public static string? GetValidationError(string eekRoot)
@@ -64,6 +87,27 @@ public static class EekIntegration
         }
 
         return null;
+    }
+
+    public static string GetScannerPath(string eekRoot)
+    {
+        return Path.Combine(NormalizeEekRoot(eekRoot), "bin64", "a2cmd.exe");
+    }
+
+    public static string GetReportsFolder(string eekRoot)
+    {
+        return Path.Combine(NormalizeEekRoot(eekRoot), "Reports");
+    }
+
+    public static string GetQuarantineFolder(string eekRoot)
+    {
+        return Path.Combine(NormalizeEekRoot(eekRoot), "Quarantine");
+    }
+
+    private static bool GetBoolSetting(string name, bool fallback)
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(SettingsKeyPath);
+        return key?.GetValue(name) is int value ? value != 0 : fallback;
     }
 
     private static string NormalizeEekRoot(string path)

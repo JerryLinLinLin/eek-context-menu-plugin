@@ -20,23 +20,12 @@ public sealed partial class MainPage : Page
         _loading = true;
         EekPathBox.Text = EekIntegration.GetEekRoot();
         IntegrationToggle.IsOn = EekIntegration.IsEnabled();
+        UpdateBeforeScanToggle.IsOn = EekIntegration.CheckForUpdatesBeforeScan();
+        QuarantineToggle.IsOn = EekIntegration.QuarantineDetections();
         _loading = false;
     }
 
-    private void SaveButton_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            SaveSettings(IntegrationToggle.IsOn);
-            ShowStatus("Saved.", InfoBarSeverity.Success);
-        }
-        catch (Exception ex)
-        {
-            ShowStatus(ex.Message, InfoBarSeverity.Error);
-        }
-    }
-
-    private void IntegrationToggle_Toggled(object sender, RoutedEventArgs e)
+    private void Setting_Changed(object sender, RoutedEventArgs e)
     {
         if (_loading)
         {
@@ -45,17 +34,11 @@ public sealed partial class MainPage : Page
 
         try
         {
-            SaveSettings(IntegrationToggle.IsOn);
-            ShowStatus(
-                IntegrationToggle.IsOn ? "Explorer integration enabled." : "Explorer integration disabled.",
-                IntegrationToggle.IsOn ? InfoBarSeverity.Success : InfoBarSeverity.Informational);
+            SaveSettings();
         }
         catch (Exception ex)
         {
-            _loading = true;
-            IntegrationToggle.IsOn = EekIntegration.IsEnabled();
-            _loading = false;
-            ShowStatus(ex.Message, InfoBarSeverity.Error);
+            EekPathBox.PlaceholderText = ex.Message;
         }
     }
 
@@ -73,18 +56,16 @@ public sealed partial class MainPage : Page
         if (folder is not null)
         {
             EekPathBox.Text = folder.Path;
+            Setting_Changed(sender, e);
         }
     }
 
-    private void SaveSettings(bool enabled)
+    private void SaveSettings()
     {
-        EekIntegration.Save(EekPathBox.Text, enabled);
-    }
-
-    private void ShowStatus(string message, InfoBarSeverity severity)
-    {
-        StatusInfoBar.Message = message;
-        StatusInfoBar.Severity = severity;
-        StatusInfoBar.IsOpen = true;
+        EekIntegration.Save(
+            EekPathBox.Text,
+            IntegrationToggle.IsOn,
+            UpdateBeforeScanToggle.IsOn,
+            QuarantineToggle.IsOn);
     }
 }
