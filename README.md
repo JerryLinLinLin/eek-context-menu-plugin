@@ -1,8 +1,10 @@
-# Emsisoft Emergency Kit Explorer Scan Integration
+# <img src="Assets/Square44x44Logo.scale-200.png" width="32" height="32" alt="EEK icon"> Emsisoft Emergency Kit Explorer Scan Integration
 
 Unofficial Windows 11 Explorer integration for Emsisoft Emergency Kit. This project adds a packaged WinUI 3 settings app and a modern Explorer command so selected files or folders can be scanned with EEK's `a2cmd.exe`.
 
 This project is not affiliated with, endorsed by, or supported by Emsisoft. Emsisoft Emergency Kit is not bundled.
+
+Use this integration only with a properly licensed copy of [Emsisoft Emergency Kit](https://www.emsisoft.com/en/emergency-kit/) and comply with Emsisoft's terms. Emsisoft's [Getting Started guide](https://www.emsisoft.com/en/help/1702/getting-started/) describes Emergency Kit as free for private use, while business and other for-profit use requires the appropriate paid/business license.
 
 ## Install From GitHub Release
 
@@ -36,33 +38,6 @@ CN=EekContextMenu
 
 Install the generated certificate into **Trusted People**, then install the generated `.msix` package. The package includes both the WinUI settings app and the native Explorer command DLL; installing only `EekShellExtension.dll` is not enough for the Windows 11 Explorer integration.
 
-## Release Pipeline
-
-The GitHub Actions workflow at `.github/workflows/package-msix.yml` builds `Release|x64`, creates a self-signed test certificate whose publisher matches the package manifest, signs the MSIX package, and uploads a release zip.
-
-Run it manually from **Actions > Package MSIX > Run workflow**. You can enter a package version such as `1.0.0`, or leave it blank to use the workflow run number.
-
-To publish a GitHub Release automatically, push a tag like:
-
-```powershell
-git tag v1.0.0
-git push origin v1.0.0
-```
-
-For tag builds, the workflow updates the package manifest version from the tag, creates or updates the matching GitHub Release, and uploads `EekContextMenu-msix-<version>.zip`.
-
-The private signing key exists only in the GitHub Actions runner certificate store. The release zip contains the public `.cer` that users install to trust the test-signed package.
-
 ## License
 
 This project is licensed under the MIT License. See [LICENSE](LICENSE).
-
-## References
-
-- [Integrate a packaged app with File Explorer](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/integrate-packaged-app-with-file-explorer)
-- [`desktop4:FileExplorerContextMenus`](https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-desktop4-fileexplorercontextmenus)
-- [Continuous integration for WinUI 3 projects](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/ci-for-winui3)
-- [Sign an app package using SignTool](https://learn.microsoft.com/en-us/windows/msix/package/sign-app-package-using-signtool)
-- [Create a certificate for package signing](https://learn.microsoft.com/en-us/windows/msix/package/create-certificate-package-signing)
-- [Windows App SDK deployment overview](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/deploy-overview)
-- [Windows App SDK downloads](https://learn.microsoft.com/en-us/windows/apps/windows-app-sdk/downloads)
